@@ -1,4 +1,4 @@
-uchar8 block(ulong val) {
+uchar8 to_block(ulong val) {
     return (uchar8)(
         val,
         val >> 8,
@@ -9,6 +9,17 @@ uchar8 block(ulong val) {
         val >> 48,
         val >> 56
     );
+}
+
+ulong from_block(uchar8 val) {
+    return ((ulong)val.s0 << 0)
+         | ((ulong)val.s1 << 8)
+         | ((ulong)val.s2 << 16)
+         | ((ulong)val.s3 << 24)
+         | ((ulong)val.s4 << 32)
+         | ((ulong)val.s5 << 40)
+         | ((ulong)val.s6 << 48)
+         | ((ulong)val.s7 << 56);
 }
 
 typedef struct adder_result {
@@ -48,18 +59,15 @@ ushort16 life16x16(const ushort16 grid) {
     ushort16 a = rotate(grid, -1).sf0123456789abcde;
     ushort16 b = grid.sf0123456789abcde;
     ushort16 c = rotate(grid, 1).sf0123456789abcde;
-
     adder_result li = full_adder(a, b, c);
 
     ushort16 d = rotate(grid, -1);
     ushort16 e = rotate(grid, 1);
-
     adder_result mj = half_adder(d, e);
 
     ushort16 f = rotate(grid, -1).s123456789abcdef0;
     ushort16 g = grid.s123456789abcdef0;
     ushort16 h = rotate(grid, 1).s123456789abcdef0;
-
     adder_result nk = full_adder(g, h, f);
 
     adder_result yw = full_adder(li.sum, mj.sum, nk.sum);
@@ -93,17 +101,17 @@ ushort16 life16x16(const ushort16 grid) {
 kernel void sparse_life4(const int gens_to_simulate, const global ulong *regions, const global ushort *neighbors, global ulong *out) {
     int id = get_global_id(0);
     // read the 24 x 24 region around the region.
-    uchar8 b0_0 = block(regions[neighbors[id * 8]]);
-    uchar8 b1_0 = block(regions[neighbors[id * 8 + 1]]);
-    uchar8 b2_0 = block(regions[neighbors[id * 8 + 2]]);
+    uchar8 b0_0 = to_block(regions[neighbors[id * 8]]);
+    uchar8 b1_0 = to_block(regions[neighbors[id * 8 + 1]]);
+    uchar8 b2_0 = to_block(regions[neighbors[id * 8 + 2]]);
 
-    uchar8 b0_1 = block(regions[neighbors[id * 8 + 3]]);
-    uchar8 b1_1 = block(regions[id]);
-    uchar8 b2_1 = block(regions[neighbors[id * 8 + 4]]);
+    uchar8 b0_1 = to_block(regions[neighbors[id * 8 + 3]]);
+    uchar8 b1_1 = to_block(regions[id]);
+    uchar8 b2_1 = to_block(regions[neighbors[id * 8 + 4]]);
 
-    uchar8 b0_2 = block(regions[neighbors[id * 8 + 5]]);
-    uchar8 b1_2 = block(regions[neighbors[id * 8 + 6]]);
-    uchar8 b2_2 = block(regions[neighbors[id * 8 + 7]]);
+    uchar8 b0_2 = to_block(regions[neighbors[id * 8 + 5]]);
+    uchar8 b1_2 = to_block(regions[neighbors[id * 8 + 6]]);
+    uchar8 b2_2 = to_block(regions[neighbors[id * 8 + 7]]);
 
     // Get the central 16x16 region of that.
     ushort8 top = (convert_ushort8(b0_0) << 12) + (convert_ushort8(b1_0) << 4) + convert_ushort8(b2_0);
@@ -122,14 +130,5 @@ kernel void sparse_life4(const int gens_to_simulate, const global ulong *regions
 
     // Output the central 8x8 region.
     uchar8 central = convert_uchar16(grid >> 4).s456789ab;
-    out[id] = (
-        ((ulong)central.s0 << 0)
-        | ((ulong)central.s1 << 8)
-        | ((ulong)central.s2 << 16)
-        | ((ulong)central.s3 << 24)
-        | ((ulong)central.s4 << 32)
-        | ((ulong)central.s5 << 40)
-        | ((ulong)central.s6 << 48)
-        | ((ulong)central.s7 << 56)
-    );
+    out[id] = from_block(central);
 }
