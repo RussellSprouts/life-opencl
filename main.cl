@@ -11,25 +11,25 @@ uchar8 block(ulong val) {
     );
 }
 
-typedef struct adder_result16 {
+typedef struct adder_result {
     ushort16 sum;
     ushort16 carry;
-} adder_result16;
+} adder_result;
 
-adder_result16 half_adder16(ushort16 a, ushort16 b) {
+adder_result half_adder(ushort16 a, ushort16 b) {
     ushort16 sum = a ^ b;
     ushort16 carry = a & b;
-    return (adder_result16) {
+    return (adder_result) {
         .sum = sum,
         .carry = carry
     };
 }
 
-adder_result16 full_adder16(ushort16 a, ushort16 b, ushort16 c) {
+adder_result full_adder(ushort16 a, ushort16 b, ushort16 c) {
     ushort16 temp = a ^ b;
     ushort16 sum = temp ^ c;
     ushort16 carry = (a & b) | (temp & c);
-    return (adder_result16) {
+    return (adder_result) {
         .sum = sum,
         .carry = carry
     };
@@ -49,21 +49,21 @@ ushort16 life16x16(const ushort16 grid) {
     ushort16 b = grid.sf0123456789abcde;
     ushort16 c = rotate(grid, 1).sf0123456789abcde;
 
-    adder_result16 li = full_adder16(a, b, c);
+    adder_result li = full_adder(a, b, c);
 
     ushort16 d = rotate(grid, -1);
     ushort16 e = rotate(grid, 1);
 
-    adder_result16 mj = half_adder16(d, e);
+    adder_result mj = half_adder(d, e);
 
     ushort16 f = rotate(grid, -1).s123456789abcdef0;
     ushort16 g = grid.s123456789abcdef0;
     ushort16 h = rotate(grid, 1).s123456789abcdef0;
 
-    adder_result16 nk = full_adder16(g, h, f);
+    adder_result nk = full_adder(g, h, f);
 
-    adder_result16 yw = full_adder16(li.sum, mj.sum, nk.sum);
-    adder_result16 xz = full_adder16(li.carry, mj.carry, nk.carry);
+    adder_result yw = full_adder(li.sum, mj.sum, nk.sum);
+    adder_result xz = full_adder(li.carry, mj.carry, nk.carry);
 
     // survive if currently alive
     ushort16 result = grid;
