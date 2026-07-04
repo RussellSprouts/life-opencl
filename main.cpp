@@ -21,8 +21,14 @@ void print(uint64_t *vals, int max = N) {
             }
             std::cout << std::endl;
         }
+        std::cout << std::endl;
     }
 }
+
+class LifeGrid {
+    std::vector<uint64_t> regions;
+    std::unordered_map<std::pair<int16_t, int16_t>, uint16_t> coords;
+};
 
 int main() {
     std::vector<cl::Platform> platforms;
@@ -88,43 +94,52 @@ int main() {
 
     cl::Buffer buffer_regions_a(context, CL_MEM_READ_WRITE, sizeof(uint64_t) * N);
     cl::Buffer buffer_regions_b(context, CL_MEM_READ_WRITE, sizeof(uint64_t) * N);
-    cl::Buffer buffer_neighbors(context, CL_MEM_READ_ONLY, sizeof(uint16_t) * N * 8);
+    cl::Buffer buffer_neighbors(context, CL_MEM_READ_ONLY, sizeof(uint32_t) * N * 8);
 
     uint64_t cpu_regions_a[N];
-    uint16_t cpu_neighbors[N * 8];
+    uint32_t cpu_neighbors[N * 8];
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<uint16_t> rand_neighbor(0, 100);
+    std::uniform_int_distribution<uint32_t> rand_neighbor(0, N);
     std::uniform_int_distribution<uint64_t> rand_data(0, UINT64_MAX);
 
     // Initialize everything randomly.
     for (int i = 0; i < N; i++) {
         cpu_regions_a[i] = rand_data(gen);
         for (int j = 0; j < 8; j++) {
-            cpu_neighbors[i*8 + j] = i * 8 + j;
+            cpu_neighbors[i*8 + j] = i + j;
         }
+    }
+
+    cl::CommandQueue queue(context, device);
+
+    // Set up a zero region and a region with custom data.
+    cpu_regions_a[0] = 0;
+    cpu_regions_a[1] = (0b00000000'00000010'00000100'00000111'00000000'00000000'00000000'00000000);
+    for (int i = 0; i < 16; i++) {
+        cpu_neighbors[i] = 0;
     }
 
     print(cpu_regions_a, 2);
 
-    cl::CommandQueue queue(context, device);
-
     queue.enqueueWriteBuffer(buffer_regions_a, CL_TRUE, 0, sizeof(uint64_t) * N, cpu_regions_a);
-    queue.enqueueWriteBuffer(buffer_neighbors, CL_TRUE, 0, sizeof(uint16_t) * N * 8, cpu_neighbors);
+    queue.enqueueWriteBuffer(buffer_neighbors, CL_TRUE, 0, sizeof(uint32_t) * N * 8, cpu_neighbors);
 
-    cl::Kernel sparse_life8(program, "sparse_life8");
+    cl::Kernel sparse_life4(program, "sparse_life4");
 
-    sparse_life8.setArg<int>(0, 8);
+    int GENERATIONS = 4;
+
+    sparse_life4.setArg<int>(0, GENERATIONS);
+    sparse_life4.setArg(2, buffer_neighbors);
 
     auto start = std::chrono::steady_clock::now();
 
-    constexpr int n_iterations = 1001;
+    constexpr int n_iterations = 2000;
     for (int i = 0; i < n_iterations; i++) {
-        sparse_life8.setArg(1, buffer_regions_a);
-        sparse_life8.setArg(2, buffer_neighbors);
-        sparse_life8.setArg(3, buffer_regions_b);
-        queue.enqueueNDRangeKernel(sparse_life8, cl::NullRange, cl::NDRange(N), cl::NullRange);
+        sparse_life4.setArg(1, buffer_regions_a);
+        sparse_life4.setArg(3, buffer_regions_b);
+        queue.enqueueNDRangeKernel(sparse_life4, cl::NullRange, cl::NDRange(N), cl::NullRange);
 
         auto tmp = buffer_regions_a;
         buffer_regions_a = buffer_regions_b;
@@ -137,7 +152,7 @@ int main() {
     std::chrono::duration<double, std::milli> elapsed = end - start;
 
     auto ms = elapsed.count();
-    uint64_t cell_updates = N * 64ull * 8 * n_iterations;
+    uint64_t cell_updates = N * 64ull * GENERATIONS * n_iterations;
     std::cout << "Execution time: " << elapsed.count() << "ms" << std::endl;
     std::cout << "CUps: " << cell_updates / (ms / 1000) << std::endl;
 

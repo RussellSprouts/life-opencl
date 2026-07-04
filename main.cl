@@ -11,216 +11,125 @@ uchar8 block(ulong val) {
     );
 }
 
-typedef struct adder_result {
-    uchar8 sum;
-    uchar8 carry;
-} adder_result;
+typedef struct adder_result16 {
+    ushort16 sum;
+    ushort16 carry;
+} adder_result16;
 
-adder_result half_adder(uchar8 a, uchar8 b) {
-    uchar8 sum = a ^ b;
-    uchar8 carry = a & b;
-    return (adder_result) {
+adder_result16 half_adder16(ushort16 a, ushort16 b) {
+    ushort16 sum = a ^ b;
+    ushort16 carry = a & b;
+    return (adder_result16) {
         .sum = sum,
         .carry = carry
     };
 }
 
-adder_result full_adder(uchar8 a, uchar8 b, uchar8 c) {
-    uchar8 temp = a ^ b;
-    uchar8 sum = temp ^ c;
-    uchar8 carry = (a & b) | (temp & c);
-    return (adder_result) {
+adder_result16 full_adder16(ushort16 a, ushort16 b, ushort16 c) {
+    ushort16 temp = a ^ b;
+    ushort16 sum = temp ^ c;
+    ushort16 carry = (a & b) | (temp & c);
+    return (adder_result16) {
         .sum = sum,
         .carry = carry
     };
 }
 
 /**
- * abc
- * d e
- * fgh
- */
-typedef struct neighbor_vectors {
-    uchar8 d;
-    uchar8 e;
-
-    uchar a;
-    uchar b;
-    uchar c;
-    uchar f;
-    uchar g;
-    uchar h;
-} neighbor_vectors;
-
-/**
- * Takes the cell and its neighbor vectors, and returns
- * the new state of cell after one generation.
- * Each "cell" is an 8x8 region, and the "neighbors"
- * are 8x8 regions offset.
+ * @brief Processes one generation of life on a 16x16 torus.
  * 
- * See https://binary-banter.github.io/game-of-life/
- * We implement the addition manually using bitwise operations
- * to emulate adders. That way, each bitplane is a separate uchar8,
- * instead of having to expand to a larger bit width (e.g., 4 bits per cell)
+ * @param grid 
+ * @return ushort16 The new grid
  */
-
-
-// Shifts the 8x8 region to the Moore neighborhood, giving 8 vectors
-// representing the regions shifted over.
-uchar8 life1(uchar8 r, neighbor_vectors ns) {
-    ushort i1 = (((ushort)ns.a & (ushort)1) << 9) | ((ushort)ns.b << 1) | ((ushort)ns.c >> 7);
-    ushort8 i2 = ((convert_ushort8(ns.d) & (ushort)1) << 9) | (convert_ushort8(r) << 1) | (convert_ushort8(ns.e) >> 7);
-    ushort i3 = (((ushort)ns.f & (ushort)1) << 9) | ((ushort)ns.g << 1) | ((ushort)ns.h >> 7);
-
-    ushort8 up = shuffle(i2, (ushort8)(0,0,1,2,3,4,5,6));
-    up.s0 = i1;
-    ushort8 down = shuffle(i2, (ushort8)(1,2,3,4,5,6,7,7));
-    down.s7 = i3;
-
+ushort16 life16x16(const ushort16 grid) {
     // abc
-    // d.e
+    // dXe
     // fgh
-    uchar8 a = convert_uchar8(up >> 2);
-    uchar8 b = convert_uchar8(up >> 1);
-    uchar8 c = convert_uchar8(up);
+    ushort16 a = rotate(grid, -1).sf0123456789abcde;
+    ushort16 b = grid.sf0123456789abcde;
+    ushort16 c = rotate(grid, 1).sf0123456789abcde;
 
-    adder_result li = full_adder(a, b, c);
+    adder_result16 li = full_adder16(a, b, c);
 
-    uchar8 d = convert_uchar8(i2 >> 2);
-    uchar8 e = convert_uchar8(i2);
-    uchar8 f = convert_uchar8(down >> 2);
+    ushort16 d = rotate(grid, -1);
+    ushort16 e = rotate(grid, 1);
 
-    adder_result mj = full_adder(d, e, f);
+    adder_result16 mj = half_adder16(d, e);
 
-    uchar8 g = convert_uchar8(down >> 1);
-    uchar8 h = convert_uchar8(down);
+    ushort16 f = rotate(grid, -1).s123456789abcdef0;
+    ushort16 g = grid.s123456789abcdef0;
+    ushort16 h = rotate(grid, 1).s123456789abcdef0;
 
-    adder_result nk = half_adder(g, h);
-    adder_result yw = full_adder(li.sum, mj.sum, nk.sum);
-    adder_result xz = full_adder(li.carry, mj.carry, nk.carry);
+    adder_result16 nk = full_adder16(g, h, f);
+
+    adder_result16 yw = full_adder16(li.sum, mj.sum, nk.sum);
+    adder_result16 xz = full_adder16(li.carry, mj.carry, nk.carry);
 
     // survive if currently alive
-    uchar8 result = r;
+    ushort16 result = grid;
     // born if 1,3,5,7 neighbors
     result |= yw.sum;
     // survive if 2,3,6,7 neighbors
     result &= (yw.carry ^ xz.sum);
     // survive if 0,1,2,3 neighbors
     result &= ~xz.carry;
+
     return result;
 }
 
-
 /**
- * @brief Calculates up to 8 generations of life.
- * The regions are 8x8 regions packed in 64 bits. Each region could
- * be placed anywhere in the pattern, and is linked to its 8
- * neighbors by index in the neighbors array.
+ * @brief Simulates up to 4 generations of Life.
+ * regions is an array of 8x8 tiles packed as 64 bit ints.
+ * neighbors contains 8 neighbor indices for each region,
+ *   pointing to the 8 neighbors of that region.
+ * out is the resulting pattern of all the regions after
+ *   gens_to_simulate generations.
  * 
- * Inputs should include all 8x8 regions with live cells or empty
- * regions that neighbor live regions.
- * 
- * @param in An array of 8x8 regions that might change.
- * @param neighbors For each item in the array, 8 indices for the neighbors of the region.
+ * @param gens_to_simulate 
+ * @param regions 
+ * @param neighbors 
  * @param out 
- * @return kernel 
  */
-kernel void sparse_life8(int gens_to_simulate, const global ulong *regions, const global ushort *neighbors, global ulong *out) {
+kernel void sparse_life4(const int gens_to_simulate, const global ulong *regions, const global ushort *neighbors, global ulong *out) {
     int id = get_global_id(0);
+    // read the 24 x 24 region around the region.
     uchar8 b0_0 = block(regions[neighbors[id * 8]]);
     uchar8 b1_0 = block(regions[neighbors[id * 8 + 1]]);
     uchar8 b2_0 = block(regions[neighbors[id * 8 + 2]]);
+
     uchar8 b0_1 = block(regions[neighbors[id * 8 + 3]]);
     uchar8 b1_1 = block(regions[id]);
     uchar8 b2_1 = block(regions[neighbors[id * 8 + 4]]);
+
     uchar8 b0_2 = block(regions[neighbors[id * 8 + 5]]);
     uchar8 b1_2 = block(regions[neighbors[id * 8 + 6]]);
     uchar8 b2_2 = block(regions[neighbors[id * 8 + 7]]);
 
-    for (int gen = 0; gen < gens_to_simulate; gen++) {
-        uchar8 n0_0 = life1(
-            b0_0, (neighbor_vectors) {
-                .a = 0, .b = 0, .c = 0,
-                .d = 0,         .e = b1_0,
-                .f=0,   .g=b0_1.s0,.h = b1_1.s0
-            }
-        );
-        uchar8 n1_0 = life1(
-            b1_0, (neighbor_vectors) {
-                .a = 0, .b = 0, .c = 0,
-                .d=b0_0,        .e = b2_0,
-                .f=b0_1.s0,.g=b1_1.s0,.h = b2_1.s0
-            }
-        );
-        uchar8 n2_0 = life1(
-            b2_0, (neighbor_vectors) {
-                .a = 0, .b = 0, .c = 0,
-                .d=b1_0,        .e = 0,
-                .f=b1_1.s0,.g=b2_1.s0,.h = 0
-            }
-        );
-        uchar8 n0_1 = life1(
-            b0_1, (neighbor_vectors) {
-                .a = 0, .b=b0_0.s7,.c=b1_0.s7,
-                .d = 0,         .e=b1_1,
-                .f=0,   .g=b0_2.s0,.h=b1_2.s0
-            }
-        );
-        uchar8 n1_1 = life1(
-            b1_1, (neighbor_vectors) {
-                .a=b0_0.s7,.b=b1_0.s7,.c=b2_0.s7,
-                .d=b0_1,        .e=b2_1,
-                .f=b0_2.s0,.g=b1_2.s0,.h=b2_2.s0
-            }
-        );
-        uchar8 n2_1 = life1(
-            b2_1, (neighbor_vectors) {
-                .a=b1_0.s7,.b=b2_0.s7,.c=0,
-                .d=b1_1,        .e=0,
-                .f=b1_2.s0,.g=b2_2.s0,.h=0
-            }
-        );
-        uchar8 n0_2 = life1(
-            b0_2, (neighbor_vectors) {
-                .a = 0,.b=b0_1.s7,.c=b1_1.s7,
-                .d = 0,        .e=b1_2,
-                .f = 0,.g = 0, .h=0
-            }
-        );
-        uchar8 n1_2 = life1(
-            b1_2, (neighbor_vectors) {
-                .a=b0_1.s7,.b=b1_1.s7,.c=b2_1.s7,
-                .d=b0_2,        .e=b2_2,
-                .f = 0, .g = 0, .h = 0
-            }
-        );
-        uchar8 n2_2 = life1(
-            b2_2, (neighbor_vectors) {
-                .a=b1_1.s7,.b=b2_1.s7,.c = 0,
-                .d=b1_2,        .e = 0,
-                .f = 0, .g = 0, .h = 0
-            }
-        );
+    // Get the central 16x16 region of that.
+    ushort8 top = (convert_ushort8(b0_0) << 12) + (convert_ushort8(b1_0) << 4) + convert_ushort8(b2_0);
+    ushort8 middle = (convert_ushort8(b0_1) << 12) + (convert_ushort8(b1_1) << 4) + convert_ushort8(b2_1);
+    ushort8 bottom = (convert_ushort8(b0_2) << 12) + (convert_ushort8(b1_2) << 4) + convert_ushort8(b2_2);
 
-        b0_0 = n0_0;
-        b1_0 = n1_0;
-        b2_0 = n2_0;
-        b1_1 = n1_1;
-        b2_1 = n2_1;
-        b0_2 = n0_2;
-        b1_2 = n1_2;
-        b2_2 = n2_2;
+    ushort16 grid = (ushort16)(
+        (ushort8)(top.s4567, middle.s0123),
+        (ushort8)(middle.s4567, bottom.s0123)
+    );
+
+    // Simulate up to 4 generations
+    for (int i = 0; i < gens_to_simulate; i++) {
+        grid = life16x16(grid);
     }
 
-    // b1_1 now contains the original region advanced by gens_to_simulate generations.
+    // Output the central 8x8 region.
+    uchar8 central = convert_uchar16(grid >> 4).s456789ab;
     out[id] = (
-        ((ulong)b1_1.s0 << 0)
-        | ((ulong)b1_1.s1 << 8)
-        | ((ulong)b1_1.s2 << 16)
-        | ((ulong)b1_1.s3 << 24)
-        | ((ulong)b1_1.s4 << 32)
-        | ((ulong)b1_1.s5 << 40)
-        | ((ulong)b1_1.s6 << 48)
-        | ((ulong)b1_1.s7 << 56)
+        ((ulong)central.s0 << 0)
+        | ((ulong)central.s1 << 8)
+        | ((ulong)central.s2 << 16)
+        | ((ulong)central.s3 << 24)
+        | ((ulong)central.s4 << 32)
+        | ((ulong)central.s5 << 40)
+        | ((ulong)central.s6 << 48)
+        | ((ulong)central.s7 << 56)
     );
 }
